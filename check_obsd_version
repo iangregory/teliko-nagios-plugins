@@ -1,0 +1,53 @@
+#! /bin/sh
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+
+PROGNAME=`basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+REVISION="1.0.0"
+
+. $PROGPATH/utils.sh
+
+print_usage() {
+        echo "Usage: $PROGNAME"
+}
+
+print_help() {
+        print_revision $PROGNAME $REVISION
+        echo ""
+        print_usage
+        echo ""
+        echo "This plugin checks the version of the currently running openbsd kernel"
+        echo ""
+        support
+        exit $STATE_OK
+}
+
+case "$1" in
+        --help)
+                print_help
+                exit $STATE_OK
+                ;;
+        -h)
+                print_help
+                exit $STATE_OK
+                ;;
+        --version)
+                print_revision $PROGNAME $REVISION
+                exit $STATE_OK
+                ;;
+        -V)
+                print_revision $PROGNAME $REVISION
+                exit $STATE_OK
+                ;;
+        *)
+                osver=`/sbin/sysctl -n kern.version >&1`
+                status=$?
+                if test ${status} -eq 127; then
+                        echo "UNKNOWN - command not found"
+                        exit $STATE_UNKNOWN
+                fi
+                echo ${osver}
+                exit $STATE_OK
+                ;;
+esac

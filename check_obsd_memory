@@ -1,0 +1,145 @@
+#!/bin/sh
+#
+# OpenBSD Memory Plugin for Nagios
+#
+# Copyright 2008 - patrick@pahem.de
+# Version: 0.2
+# Date: 2008-12-31
+#
+# Description:
+# This plugin checks the used/free/total
+# memory of OpenBSD. You can set warning
+# and critical integer/precentage(%) values
+# with -w and -c. With -p you can output
+# performance data.
+#
+# Install:
+# Install the nagios-plugins package, copy
+# the script to /usr/local/libexec/nagios/
+# and set the executable bit.
+#
+# Example usage:
+# /usr/local/libexec/nagios/check_openbsd_mem.sh -w 15% -c 10% -p
+# Will produce following output:
+# OK - Free: 856M Used: 145M Total: 1001M | 856;145;1001;150;100
+#
+
+PROGNAME=$(echo $0 | awk -F\/ '{ print $NF }')
+LIBEXEC="/usr/local/libexec/nagios"
+. $LIBEXEC/utils.sh
+print_usage()
+{
+  echo "Usage: $0 [-w <integer value>] [-c <integer value>] [-p]"
+  echo "Usage: $0 -h"
+  echo ""
+  echo "Arguments:"
+  echo "  -w <integer value>"
+  echo "    Generate warning state if free memory under integer/percentage(%) value"
+  echo "  -c <integer value>"
+  echo "    Generate critical state if free memory under integer/percentage(%) value"
+  echo "  -p"
+  echo "    Output performance data"
+  echo ""
+}
+print_help()
+{
+  echo "OpenBSD memory status plugin for Nagios"
+  echo ""
+  print_usage
+}
+
+while test -n "$1"; do
+  case "$1" in
+    -h)
+      print_help
+      exit $STATE_OK
+      ;;
+    -w)
+      if [ $(echo $2 | grep "%$") ]; then
+        percent_warn=$2
+      else
+        int_warn=$2
+      fi
+      shift
+      ;;
+    -c)
+      if [ $(echo $2 | grep "%$") ]; then
+        percent_crit=$2
+      else
+        int_crit=$2
+      fi
+      shift
+      ;;
+    -p)
+      perf=1
+      ;;
+    *)
+      echo "Unknown argument: $1"
+      print_usage
+      exit $STATE_UNKNOWN
+      ;;
+ esac
+ shift
+done
+
+# get used memory
+USED_MEM=$(top -b | grep "^Memory" | awk -F: '{ print $3 }' | awk -F/ '{ print $2 }' | awk '{ print $1 }' | sed 's/M//g')
+# get free memory
+FREE_MEM=$(top -b | grep "^Memory" | awk -F: '{ print $4 }' | awk '{ print $1 }' | sed 's/M//g')
+# calc total memory
+TOTAL_MEM=$(($USED_MEM+$FREE_MEM))
+
+# checks -w and -c parameter and transform input
+# percentage warning
+if [ -n "$percent_warn" ]; then
+  percent_warn=$(echo $percent_warn | sed 's/%//g')
+  if [ $percent_warn -gt 100 ]; then
+    echo "Error: Percentage of warning (-w) over 100%."
+    exit $STATE_UNKNOWN
+  else
+    WARN=$(($TOTAL_MEM*$percent_warn/100))
+  fi
+fi
+# percentage critical
+if [ -n "$percent_crit" ]; then
+  percent_crit=$(echo $percent_crit | sed 's/%//g')
+  if [ $percent_crit -gt 100 ]; then
+    echo "Error: Percentage of critical (-c) over 100%."
+    exit $STATE_UNKNOWN
+  else
+    CRIT=$(($TOTAL_MEM*$percent_crit/100))
+  fi
+fi
+# integer warning
+if [ -n "$int_warn" ]; then
+  WARN="$int_warn"
+fi
+# integer critical
+if [ -n "$int_crit" ]; then
+  CRIT="$int_crit"
+fi
+
+# output with or without performance data
+if [ "$perf" = 1 ]; then
+  OUTPUT="Free: "$FREE_MEM"M Used: "$USED_MEM"M Total: "$TOTAL_MEM"M | $FREE_MEM;$USED_MEM;$TOTAL_MEM;$WARN;$CRIT"
+else
+  OUTPUT="Free: "$FREE_MEM"M Used: "$USED_MEM"M Total: "$TOTAL_MEM"M"
+fi
+# checks critical parameter if any specified
+if [ -n "$CRIT" ]; then
+  if [ $FREE_MEM -lt $CRIT ]; then
+    echo -n "CRITICAL - $OUTPUT"
+    exit $STATE_CRITICAL
+  fi
+fi
+# checks warning parameter if any specified
+if [ -n "$WARN" ];then
+  if [ $FREE_MEM -lt $WARN ]; then
+    echo -n "WARNING - $OUTPUT"
+    exit $STATE_WARNING
+  fi
+fi
+
+# output for STATE_OK
+echo -n "OK - $OUTPUT"
+exit $STATE_OK

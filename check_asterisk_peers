@@ -1,0 +1,146 @@
+#!/usr/bin/perl -w
+# simple plugin to check a sip peer/trunk state
+# floyd <nixfloyd@gmail.com>, <gl@remsys.net>
+#
+# Extended to support stats by ian <ian@ians-net.co.uk>
+#
+# you will need the Asterisk::Manager module, from http://asterisk.gnuinter.net/
+#
+# sample usage:
+# ./check_asterisk_trunk.pl -h localhost -u admin -s c00lp455w0rd -t sipgate
+#
+#
+# You can also use a separate asterisk manager user for the checks, add this to /etc/asterisk/manager.conf
+# ----------------
+# [admin-mon]
+# secret = m3g4p455w0rd
+# deny=0.0.0.0/0.0.0.0
+# permit=127.0.0.1/255.255.255.0
+# read = command,system,verbose
+# write = command,system
+# ----------------
+#
+# usage:
+# ./check_asterisk_trunk.pl -h localhost -u admin-mon -s m3g4p455w0rd -t sipgate
+#
+#
+use Getopt::Long;
+use Asterisk::Manager;
+use strict;
+
+my $host = "";
+my $user = "";
+my $secret = "";
+my $trunk = "";
+our @peers;
+GetOptions ('host|h=s'=>\$host, 'user|u=s'=>\$user, 'secret|s=s'=>\$secret, 'trunk|t=s'=>\$trunk);
+
+if (check_vars()) {
+        exit(-1);
+}
+
+my $astman = new Asterisk::Manager;
+
+$astman->user($user);
+$astman->secret($secret);
+$astman->host($host);
+$astman->debug(1);
+
+$astman->connect || die $astman->error . "\n";
+
+$astman->setcallback('PeerEntry', \&sippeers_callback);
+$astman->setcallback('PeerlistComplete', \&peerlist_complete);
+$astman->setcallback('DEFAULT', \&default_callback);
+
+$astman->sendcommand(Action => 'SIPpeers');
+$astman->sendcommand(Action => 'Logoff');
+$astman->eventloop;
+$astman->disconnect;
+
+
+sub sippeers_callback {
+        my %stuff = @_;
+        push @peers, \%stuff;
+}
+
+
+#sample result:
+#Dynamic: no
+#IPport: 5060
+#Event: PeerEntry
+#Status: OK (334 ms)
+#Natsupport: no
+#RealtimeDevice: no
+#ObjectName: voip.domain.com
+#ACL: no
+#IPaddress: 1.2.3.4
+#VideoSupport: no
+#Channeltype: SIP
+#ChanObjectType: peer
+
+sub peerlist_complete {
+        foreach my $peer (@peers) {
+                if ($peer->{"ObjectName"} eq $trunk)
+                {
+                        if ($peer->{"IPaddress"} eq "-none-")
+                        {
+                                print "CRITICAL: Trunk down! IP address is \"-none-\"\n";
+                                exit(2);
+                        }
+                        if ($peer->{"Status"} eq "UNKNOWN")
+                        {
+                                print "CRITICAL: Trunk down! Status is \"UNKNOWN\"\n";
+                                exit(2);
+                        }
+
+                        if ($peer->{"Status"} eq "UNREACHABLE")
+                        {
+                                print "CRITICAL: Trunk down! Status is \"UNREACHABLE\"\n";
+                                exit(2);
+                        }
+                        my ($latency) = $peer->{"Status"} =~ m/\((\d+) ms\)/;
+                        print "OK: Peer is up: ".$peer->{"ObjectName"}."\t".$peer->{"IPaddress"}."\t".$peer->{"Status"}."|latency=$latency\n";
+                        exit (0);
+                }
+        }
+        print "CRITICAL: No such peer $trunk !\n";
+        exit(2);
+}
+
+sub default_callback {
+        print "--------------------------------------------------\n";
+}
+
+sub check_vars {
+        if (length($host)<=0) {
+                print_usage("Host variable missing");
+                return(3);
+        }
+        if (length($user)<=0) {
+                print_usage("User variable missing");
+                return(3);
+        }
+        if (length($secret)<=0) {
+                print_usage("Secret variable missing");
+                return(3);
+        }
+        if (length($trunk)<=0) {
+                print_usage("Trunk variable missing");
+                return(3);
+        }
+
+}
+
+sub print_usage {
+        my ($msg)=@_;
+        if ($msg) {
+                print "Error: $msg\n";
+        }
+        print "\n";
+        print "--host -h\t\tHost to connect to\n";
+        print "--user -u\t\tUser to connect as\n";
+        print "--secret -s\t\tSecret for user\n";
+        print "--trunk -t\t\tSIP trunk to check\n";
+        print "\n";
+        print "\n";
+}
